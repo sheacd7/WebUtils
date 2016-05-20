@@ -1,18 +1,18 @@
 #!/bin/bash
 # META =========================================================================
-# Title: get-wiki.sh
-# Usage: get-wiki.sh -i subject_list
-# Description: Download first wikipedia page for each subject in list
+# Title: wiki-search.sh
+# Usage: wiki-search.sh -i subject_list -d disambiguate_term
+# Description: Search wikipedia for subjects with optional disambiguation terms
 # Author: Colin Shea
 # Created: 2016-05-18
 
 # TODO
-# get html 
+# format output from html
 
 scriptname=$(basename $0)
 function usage {
   echo "Usage: $scriptname"
-  echo "Download first wikipedia page for subject (or list of subjects)."
+  echo "Search wikipedia for subjects with optional disambiguation terms."
   echo "  -i, --list          list of subjects"
   echo "  -d, --disambiguate  additional term for all subjects"
   echo "  -h, --help          display help"
@@ -31,7 +31,9 @@ while [[ $# > 0 ]]; do
 done
 
 # define file input/output
-ROOTDIR="/cygdrive/c/Users/sheacd/temp/genres"
+#ROOTDIR="/cygdrive/c/Users/sheacd/GitHub/WebUtils"
+ROOTDIR="$(dirname $0)"
+#printf '%s\n' "${ROOTDIR}"
 topic=""
 
 # define input
@@ -81,7 +83,7 @@ function raw_url_decode() {
 }
 
 function parse_wiki_search_results() {
-
+  echo "Test"
 }
 
 # get max user length for string padding format
@@ -114,42 +116,74 @@ for subject in "${subjects[0]}"; do
   # replace %20 (space) with '+'
   url_suffix="${url_suffix//%20/+}"
   url="${wiki_search_url}${url_suffix}"
-  printf '%s\n' "${url_suffix}"
+#  printf '%s\n' "${url_suffix}"
 
   # curl wiki search
   subject_html="${ROOTDIR}/html/wiki/${subject}.html"
   if [[ ! -f "${subject_html}" ]]; then
     sleep "${DELAY}"
-    curl --silent "${url}" > "${subject_html}"
+#    curl --silent "${url}" > "${subject_html}"
   fi
 
   # parse html for search results 
-    # get line num at start of search results
-  search_results_start=$( grep -xnm 1 "<ul class='mw-search-results'>" "${subject_html}" )
-  search_results_end=$( grep -nm 1 '^<div class="visualClear">' "${subject_html}" )
-    # map to array
+  mapfile -t search_results < <( \
+    < "${subject_html}" \
+    grep "class='mw-search-result-heading'" | \
+    sed -e 's,</*li[^>]*>,,g;s,</*div[^>]*>,,g;s,</*span[^>]*>,,g;s,</*ul[^>]*>,,g' )
 
-  
-  <li>
-  <div class='mw-search-result-heading'>
-  <a href="/wiki/10_Years_(band)" title="10 Years (band)" data-serp-pos="1">
-  10 Years (band)
-  </a>    
-  </div> 
-  <div class='searchresult'>
-  10 Years are an American rock band, formed in Knoxville, Tennessee in 1999. The band consists of Jesse Hasek (lead vocals), Ryan Johnson (guitar, backing
-  </div>
-  <div class='mw-search-result-data'>
-  18 KB (1,826 words) - 22:52, 3 May 2016
-  </div>
-  </li>
+  declare -a hrefs
+  declare -a titles
+  declare -a previews
+  # map to array
+  for result in "${search_results[@]}"; do
+    pos="${result##*data-serp-pos=\"}"
+    pos="${pos%%\"*}"
+    href="${result##*href=\"}"
+    href="${href%%\"*}"
+    title="${result##*title=\"}"
+    title="${title%%\"*}"
+    preview="${result##*</a>}"
 
-  # ' class="searchmatch"'
-  # '<span>'
-  # '</span>'
+    hrefs[$pos]="${href}"
+    titles[$pos]="${title}"
+    previews[$pos]="${preview}"
+  done
+ 
+  for pos in "${!hrefs[@]}"; do
+    printf '%s, %s, %s\n' "${pos}" "${hrefs[$pos]}" "${titles[$pos]}" 
+    printf '%s\n' "${previews[$pos]}"
+  done
 
   # save html of search result
   
 done
 
 # scratch ======================================================================
+
+#  search_results_start=$( \
+#    grep -xnm 1 "<ul class='mw-search-results'>" "${subject_html}" | \
+#    cut -f 1 -d ':' )
+#  search_results_end=$( \
+#    grep -nm 1 '^<div class="visualClear">' "${subject_html}" | \
+#    cut -f 1 -d ':' )
+#  h_line=$(( search_results_end - 1 ))
+#  t_line=$(( search_results_end - search_results_start ))
+
+#    head -${h_line} | \
+#    tail -${t_line} | \
+
+    # search position as index
+    # href link and title
+    # preview text
+#  mapfile -t hrefs < <( \
+#    printf '%s\n' "${search_results[@]}" | \
+#    grep -Eo 'href="[^"]*"' | \
+#    sed 's,href=,,g' )
+#  mapfile -t titles < <( \
+#    printf '%s\n' "${search_results[@]}" | \
+#    grep -Eo 'title="[^"]*"' | \
+#    sed 's,title=,,g' )
+#  mapfile -t indices < <( \
+#    printf '%s\n' "${search_results[@]}" | \
+#    grep -Eo 'data-serp-pos="[^"]*"' | \
+#    sed 's,data-serp-pos=,,g' )  
