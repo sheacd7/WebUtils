@@ -8,6 +8,7 @@
 
 # TODO
 # format output from html
+# "lucky" option - emit href to first search result
 
 scriptname=$(basename $0)
 function usage {
@@ -50,7 +51,7 @@ if [[ ! -z "${DISAM}" ]]; then
 fi
 
 # params
-DELAY=2
+DELAY=5
 
 wiki_search_url="https://en.wikipedia.org/w/index.php?"
 #wiki_search_string="booker+t.+%26+the+m.g.s+%28band%29"
@@ -86,23 +87,15 @@ function parse_wiki_search_results() {
   echo "Test"
 }
 
-# get max user length for string padding format
-max_len=0
-for string in "${subjects[@]}"; do
-  if [[ ${#string} -gt $max_len ]]; then
-    max_len=${#string}
-  fi
-done
 
-for subject in "${subjects[0]}"; do
+
+for subject in "${subjects[@]}"; do
 
   # encode string for url
   [[ ! -z "${topic}" ]] && subject+=" ${topic}"
   raw_url_encode "${subject}"
   wiki_search_params["search"]="${url_enc_string}"
 
-#  printf '%-*s %s\n' ${max_len} "${subject}" "${url_enc_string}"
-#  printf '%-*s' ${max_len} "${subject}"
   printf '%s\n' "${subject}"
 
   # assemble URL
@@ -122,7 +115,7 @@ for subject in "${subjects[0]}"; do
   subject_html="${ROOTDIR}/html/wiki/${subject}.html"
   if [[ ! -f "${subject_html}" ]]; then
     sleep "${DELAY}"
-#    curl --silent "${url}" > "${subject_html}"
+    curl --silent "${url}" > "${subject_html}"
   fi
 
   # parse html for search results 
@@ -150,8 +143,8 @@ for subject in "${subjects[0]}"; do
   done
  
   for pos in "${!hrefs[@]}"; do
-    printf '%s, %s, %s\n' "${pos}" "${hrefs[$pos]}" "${titles[$pos]}" 
-    printf '%s\n' "${previews[$pos]}"
+    printf '%2s, %s, %s\n' "${pos}" "${hrefs[$pos]}" "${titles[$pos]}" 
+#    printf '%s\n' "${previews[$pos]}"
   done
 
   # save html of search result
