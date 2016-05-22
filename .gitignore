@@ -1,5 +1,7 @@
 # intermediate files
 html/
+scratch/
+*.txt
 
 # Windows image file caches
 Thumbs.db

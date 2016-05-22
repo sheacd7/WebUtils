@@ -7,8 +7,7 @@
 # Created: 2016-05-18
 
 # TODO
-# format output from html
-# "lucky" option - emit href to first search result
+# "lucky" option - emit href to first search result if no match
 
 scriptname=$(basename $0)
 function usage {
@@ -83,6 +82,33 @@ function raw_url_decode() {
   printf -v url_dec_string '%b' "${1//%/\\x}"
 }
 
+function string_match() {
+  # try to match string to target with heuristic substitutions
+  local target="${1}"
+  local string="${2}"
+  match_result="True"
+  # try exact literal match
+  [[ "${target}" == "${string}" ]] && return
+  # try canonical capitalization
+  target="${target// And / and }"
+  target="${target// For / for }"
+  target="${target// The / the }"
+  [[ "${target}" == "${string}" ]] && return
+  # try and | &
+  [[ "${target// and / & }" == "${string}" ]] && return
+  [[ "${target// & / and }" == "${string}" ]] && return
+  # try leading "The "
+  target2="${target#The }"
+  [[ "${target2}" == "${string}" ]] && return
+  target2="The ${target}"
+  [[ "${target2}" == "${string}" ]] && return
+  # last ditch, try trailing '.' for initialisms
+  [[ "${target}." == "${string}" ]] && return
+  
+  match_result="False"
+  return
+}
+
 function parse_wiki_search_results() {
   echo "Test"
 }
@@ -92,7 +118,6 @@ function parse_wiki_search_results() {
 for subject in "${subjects[@]}"; do
 
   # encode string for url
-  [[ ! -z "${topic}" ]] && subject+=" ${topic}"
   raw_url_encode "${subject}"
   wiki_search_params["search"]="${url_enc_string}"
 
@@ -135,6 +160,7 @@ for subject in "${subjects[@]}"; do
     href="${href%%\"*}"
     title="${result##*title=\"}"
     title="${title%%\"*}"
+    title="${title//&amp;/&}"
     preview="${result##*</a>}"
 
     hrefs[$pos]="${href}"
@@ -142,13 +168,39 @@ for subject in "${subjects[@]}"; do
     previews[$pos]="${preview}"
   done
  
-  for pos in "${!hrefs[@]}"; do
-    printf '%2s, %s, %s\n' "${pos}" "${hrefs[$pos]}" "${titles[$pos]}" 
-#    printf '%s\n' "${previews[$pos]}"
+  # try to match subject to title
+  match=""
+   for pos in "${!hrefs[@]}"; do
+    string_match "${subject}" "${titles[$pos]}"
+    [[ "${match_result}" == "True" ]] && match="${pos}" && break
   done
 
-  # save html of search result
-  
+  # if no match found, try disambiguator
+  if [[ -z "${match}" && ! -z "${topic}" ]]; then
+    subject+=" ${topic}"
+  fi
+  for pos in "${!hrefs[@]}"; do
+    string_match "${subject}" "${titles[$pos]}"
+    [[ "${match_result}" == "True" ]] && match="${pos}" && break
+  done
+
+  # if still no match, spit out full search results
+  if [[ ! -z "${match}" ]]; then
+    # match found
+    if [[ "${subject}" == "${titles[$match]}" ]]; then
+      printf '%s, %s\n' "${subject}" "${hrefs[$match]}" >> "${ROOTDIR}/matches_exact.txt"
+    else
+      printf '%s, %s, %s\n' "${subject}" "${titles[$match]}" "${hrefs[$match]}" >> "${ROOTDIR}/matches_fuzzy.txt"
+    fi
+  else
+    # no match found, dump results
+    printf '%s\n' "${subject}" >> "${ROOTDIR}/nonmatches.txt"
+    printf '%s\n' "${subject}" >> "${ROOTDIR}/nonmatch_results.txt"
+    for pos in "${!hrefs[@]}"; do
+      printf '%2s, %s, %s\n' "${pos}" "${hrefs[$pos]}" "${titles[$pos]}" >> "${ROOTDIR}/nonmatch_results.txt"
+#      printf '%s\n' "${previews[$pos]}"
+    done    
+  fi
 done
 
 # scratch ======================================================================
@@ -180,3 +232,25 @@ done
 #    printf '%s\n' "${search_results[@]}" | \
 #    grep -Eo 'data-serp-pos="[^"]*"' | \
 #    sed 's,data-serp-pos=,,g' )  
+
+
+#    target="${subject}"
+#    title="${titles[$pos]}"
+#
+#    # try exact literal match
+#    [[ "${target}" == "${title}" ]] && match="${pos}" && break
+#    # try canonical capitalization
+#    target="${target// And / and }"
+#    target="${target// For / for }"
+#    target="${target// The / the }"
+#    [[ "${target}" == "${title}" ]] && match="${pos}" && break
+#    # try and | &
+#    [[ "${target// and / & }" == "${title}" ]] && match="${pos}" && break
+#    [[ "${target// & / and }" == "${title}" ]] && match="${pos}" && break
+#    # try leading "The "
+#    target2="${target#The }"
+#    [[ "${target2}" == "${title}" ]] && match="${pos}" && break
+#    target2="The ${target}"
+#    [[ "${target2}" == "${title}" ]] && match="${pos}" && break
+#    # last ditch, try trailing '.' for initialisms
+#    [[ "${target}." == "${title}" ]] && match="${pos}" && break
