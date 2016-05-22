@@ -137,7 +137,7 @@ for subject in "${subjects[@]}"; do
 #  printf '%s\n' "${url_suffix}"
 
   # curl wiki search
-  subject_html="${ROOTDIR}/html/wiki/${subject}.html"
+  subject_html="${ROOTDIR}/html/wiki/search/${subject}.html"
   if [[ ! -f "${subject_html}" ]]; then
     sleep "${DELAY}"
     curl --silent "${url}" > "${subject_html}"
