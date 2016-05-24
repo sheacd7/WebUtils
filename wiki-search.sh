@@ -8,6 +8,9 @@
 
 # TODO
 # "lucky" option - emit href to first search result if no match
+# fix artist names for ~13 nonmatches
+# diagnose why AC-DC, Eagles, and Run-D.M.C are not matched
+# fuzzy match non-ASCII characters
 
 scriptname=$(basename $0)
 function usage {
