@@ -8,9 +8,8 @@
 
 # TODO
 # "lucky" option - emit href to first search result if no match
-# fix artist names for ~13 nonmatches
-# diagnose why AC-DC, Eagles, and Run-D.M.C are not matched
 # fuzzy match non-ASCII characters
+
 
 scriptname=$(basename $0)
 function usage {
@@ -49,19 +48,42 @@ else
   exit
 fi
 if [[ ! -z "${DISAM}" ]]; then
-  topic="${DISAM}"
+  disambig_file="${DISAM}"
+  mapfile -t disambiguators < "${disambig_file}"
+  disambiguators=( "${disambiguators[@]//\"/}" )
 fi
 
-# params
+# script curl parameters
 DELAY=5
 
-wiki_search_url="https://en.wikipedia.org/w/index.php?"
-#wiki_search_string="booker+t.+%26+the+m.g.s+%28band%29"
-declare -A wiki_search_params
-wiki_search_params["search"]=""
-wiki_search_params["title"]="Special%3ASearch"
-wiki_search_params["fulltext"]="Search"
 
+
+function set_wiki_search_url() {
+  search_query="${1}"
+
+  # wikipedia search url parameters
+  wiki_search_base_url="https://en.wikipedia.org/w/index.php?"
+  declare -A wiki_search_params
+  wiki_search_params["search"]=""
+  wiki_search_params["title"]="Special%3ASearch"
+  wiki_search_params["fulltext"]="Search"
+
+  # encode string for url
+  raw_url_encode "${search_query}"
+  wiki_search_params["search"]="${url_enc_string}"
+
+  # assemble URL
+  url_suffix=""
+  for param in "${!wiki_search_params[@]}"; do
+    if [[ "${param}" != "" ]]; then
+      url_suffix+="${param}"'='"${wiki_search_params[$param]}"'&'
+    fi
+  done
+  url_suffix="${url_suffix/%&/}"
+  # replace %20 (space) with '+'
+  url_suffix="${url_suffix//%20/+}"
+  wiki_search_url="${wiki_search_base_url}${url_suffix}"
+}
 
 function raw_url_encode() {
   local string="${1}"
@@ -112,53 +134,22 @@ function string_match() {
   return
 }
 
-function parse_wiki_search_results() {
-  echo "Test"
-}
-
-
-
-for subject in "${subjects[@]}"; do
-
-  # encode string for url
-  raw_url_encode "${subject}"
-  wiki_search_params["search"]="${url_enc_string}"
-
-  printf '%s\n' "${subject}"
-
-  # assemble URL
-  url_suffix=""
-  for param in "${!wiki_search_params[@]}"; do
-    if [[ "${param}" != "" ]]; then
-      url_suffix+="${param}"'='"${wiki_search_params[$param]}"'&'
-    fi
-  done
-  url_suffix="${url_suffix/%&/}"
-  # replace %20 (space) with '+'
-  url_suffix="${url_suffix//%20/+}"
-  url="${wiki_search_url}${url_suffix}"
-#  printf '%s\n' "${url_suffix}"
-
-  # curl wiki search
-  subject_html="${ROOTDIR}/html/wiki/search/${subject}.html"
-  if [[ ! -f "${subject_html}" ]]; then
-    sleep "${DELAY}"
-    curl --silent "${url}" > "${subject_html}"
-  fi
+function parse_wiki_search_page() {
+  local page="${1}"
 
   # parse html for search results 
   mapfile -t search_results < <( \
     < "${subject_html}" \
     grep "class='mw-search-result-heading'" | \
-    sed -e 's,</*li[^>]*>,,g;s,</*div[^>]*>,,g;s,</*span[^>]*>,,g;s,</*ul[^>]*>,,g' )
+    sed -e 's,</*li[^>]*>,,g' \
+        -e 's,</*div[^>]*>,,g' \
+        -e 's,</*span[^>]*>,,g' \
+        -e 's,</*ul[^>]*>,,g' )
 
-  declare -a hrefs
-  declare -a titles
-  declare -a previews
-  # map to array
+  # map search results to arrays
+  local i=-1
   for result in "${search_results[@]}"; do
-    pos="${result##*data-serp-pos=\"}"
-    pos="${pos%%\"*}"
+    : $(( i++ ))
     href="${result##*href=\"}"
     href="${href%%\"*}"
     title="${result##*title=\"}"
@@ -166,28 +157,133 @@ for subject in "${subjects[@]}"; do
     title="${title//&amp;/&}"
     preview="${result##*</a>}"
 
-    hrefs[$pos]="${href}"
-    titles[$pos]="${title}"
-    previews[$pos]="${preview}"
+    hrefs[$i]="${href}"
+    titles[$i]="${title}"
+    previews[$i]="${preview}"
   done
- 
-  # try to match subject to title
-  match=""
-   for pos in "${!hrefs[@]}"; do
-    string_match "${subject}" "${titles[$pos]}"
-    [[ "${match_result}" == "True" ]] && match="${pos}" && break
+}
+
+function parse_wiki_disambiguation_page() {
+  local page="${1}"
+
+  # parse html for relevant disambiguation results
+  mapfile -t disambiguation_results < <( \
+    < "${page}" \
+    sed 's,<[^a>]*>,,g;s,<div[^>]*>,,g' | \
+#    grep -f "${disambig_file}" )
+    grep -e "band" \
+         -e "music group" \
+         -e "rock group" \
+         -e "musician" \
+         -e "vocalist" \
+         -e "singer" \
+         -e "guitarist" )
+
+  # map disambiguation results to arrays
+  local i=-1
+  for result in "${disambiguation_results[@]}"; do
+    : $(( i++ ))
+    href="${result##*href=\"}"
+    href="${href%%\"*}"
+    title="${result##*title=\"}"
+    title="${title%%\"*}"
+    title="${title//&amp;/&}"
+    preview="${result##*</a>}"
+
+    hrefs[$i]="${href}"
+    titles[$i]="${title}"
+    previews[$i]="${preview}"
   done
 
-  # if no match found, try disambiguator
-  if [[ -z "${match}" && ! -z "${topic}" ]]; then
-    subject+=" ${topic}"
+}
+
+
+for subject in "${subjects[@]}"; do
+
+  printf '%s\n' "${subject}"
+
+  subject_disambig="${subject}"' (disambiguation)'
+  # build url
+  set_wiki_search_url "${subject_disambig}"
+  # get page
+  subject_html="${ROOTDIR}/html/wiki/search/${subject_disambig}.html"
+  # curl wiki search url
+  if [[ ! -f "${subject_html}" ]]; then
+    sleep "${DELAY}"
+    curl --silent "${wiki_search_url}" > "${subject_html}"
   fi
+
+  # does (disambiguation) page exist
+  disambig_line="$( \
+    < "${subject_html}" \
+    grep -om 1 -e 'href="[^"]*" title="[^"]*" class="mw-disambig"' \
+               -e 'href="[^"]*" title="[^"]*" class="mw-redirect mw-disambig"' )"
+
+  declare -a hrefs
+  declare -a titles
+  declare -a previews
+
+  if [[ ! -z "${disambig_line}" ]]; then
+    href="${disambig_line##*href=\"}"
+    href="${href%%\"*}"
+    title="${disambig_line##*title=\"}"
+    title="${title%%\"*}"
+    title="${title//&amp;/&}"
+
+    # build url
+    wiki_url="https://en.wikipedia.org${href}"
+    # get page
+    subject_html="${ROOTDIR}/html/wiki/${title}.html"
+    # curl wiki search url
+    if [[ ! -f "${subject_html}" ]]; then
+      sleep "${DELAY}"
+      curl --silent "${wiki_url}" > "${subject_html}"
+    fi
+
+    parse_wiki_disambiguation_page "${subject_html}"
+
+    # output disambiguation results
+    printf '%s\n' "${subject}" >> "${ROOTDIR}/disambiguations.txt"
+    printf '%s\n' "${subject}" >> "${ROOTDIR}/disambiguation_results.txt"
+    for pos in "${!hrefs[@]}"; do
+      printf '%2s, %s, %s\n' "${pos}" "${hrefs[$pos]}" "${titles[$pos]}" >> "${ROOTDIR}/disambiguation_results.txt"
+      # printf '%s\n' "${previews[$pos]}"
+    done
+  else
+    set_wiki_search_url "${subject}"
+    # get page
+    subject_html="${ROOTDIR}/html/wiki/search/${subject}.html"
+    # curl wiki search url
+    if [[ ! -f "${subject_html}" ]]; then
+      sleep "${DELAY}"
+      curl --silent "${url}" > "${subject_html}"
+    fi
+  
+    parse_wiki_search_page "${subject_html}"
+
+  fi
+
+  # try to match subject to title
+  match=""
   for pos in "${!hrefs[@]}"; do
     string_match "${subject}" "${titles[$pos]}"
     [[ "${match_result}" == "True" ]] && match="${pos}" && break
   done
 
-  # if still no match, spit out full search results
+  # if no match found, try disambiguators
+  if [[ -z "${match}" && ! -z "${DISAM}" ]]; then
+    for disambiguator in "${disambiguators[@]}"; do
+      d_subject="${subject} (${disambiguator})"
+      echo "${d_subject}"
+      for pos in "${!hrefs[@]}"; do
+        string_match "${d_subject}" "${titles[$pos]}"
+        [[ "${match_result}" == "True" ]] && match="${pos}" && break
+      done
+      [[ ! -z "${match}" ]] && break
+    done
+  fi
+
+  # output matches
   if [[ ! -z "${match}" ]]; then
     # match found
     if [[ "${subject}" == "${titles[$match]}" ]]; then
@@ -196,14 +292,21 @@ for subject in "${subjects[@]}"; do
       printf '%s, %s, %s\n' "${subject}" "${titles[$match]}" "${hrefs[$match]}" >> "${ROOTDIR}/matches_fuzzy.txt"
     fi
   else
+    # save first match to lucky results
+    printf '%s, %s, %s\n' "${subject}" "${titles[0]}" "${hrefs[0]}" >> "${ROOTDIR}/matches_lucky.txt"
     # no match found, dump results
     printf '%s\n' "${subject}" >> "${ROOTDIR}/nonmatches.txt"
     printf '%s\n' "${subject}" >> "${ROOTDIR}/nonmatch_results.txt"
     for pos in "${!hrefs[@]}"; do
       printf '%2s, %s, %s\n' "${pos}" "${hrefs[$pos]}" "${titles[$pos]}" >> "${ROOTDIR}/nonmatch_results.txt"
-#      printf '%s\n' "${previews[$pos]}"
-    done    
+      # printf '%s\n' "${previews[$pos]}"
+    done
   fi
+
+  unset hrefs
+  unset titles
+  unset previews
+
 done
 
 # scratch ======================================================================
@@ -236,24 +339,16 @@ done
 #    grep -Eo 'data-serp-pos="[^"]*"' | \
 #    sed 's,data-serp-pos=,,g' )  
 
-
-#    target="${subject}"
-#    title="${titles[$pos]}"
-#
-#    # try exact literal match
-#    [[ "${target}" == "${title}" ]] && match="${pos}" && break
-#    # try canonical capitalization
-#    target="${target// And / and }"
-#    target="${target// For / for }"
-#    target="${target// The / the }"
-#    [[ "${target}" == "${title}" ]] && match="${pos}" && break
-#    # try and | &
-#    [[ "${target// and / & }" == "${title}" ]] && match="${pos}" && break
-#    [[ "${target// & / and }" == "${title}" ]] && match="${pos}" && break
-#    # try leading "The "
-#    target2="${target#The }"
-#    [[ "${target2}" == "${title}" ]] && match="${pos}" && break
-#    target2="The ${target}"
-#    [[ "${target2}" == "${title}" ]] && match="${pos}" && break
-#    # last ditch, try trailing '.' for initialisms
-#    [[ "${target}." == "${title}" ]] && match="${pos}" && break
+#  disambig_line="$( \
+#    < "${subject_html}" \
+#    sed 's,<[^>]*>,,g' | \
+#    grep -n 'There is a page named "${subject} (disambiguation)" on Wikipedia' | \
+#    cut -f 1 -d ':' )"
+#    disambig_result="$( \
+#      < "${subject_html}" \
+#      head -${disambig_line} | \
+#      tail -1 | \
+#      sed -e 's,</*li[^>]*>,,g' \
+#          -e 's,</*div[^>]*>,,g' \
+#          -e 's,</*span[^>]*>,,g' \
+#          -e 's,</*ul[^>]*>,,g' )"

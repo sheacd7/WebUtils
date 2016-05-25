@@ -7,10 +7,6 @@
 # Created: 2016-05-22
 
 # TODO
-# if genre not found,
-#   find disambiguation link if it exists (~67)
-# 
-
 
 scriptname=$(basename $0)
 function usage {
