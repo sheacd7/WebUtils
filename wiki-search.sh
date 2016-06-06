@@ -33,10 +33,7 @@ while [[ $# > 0 ]]; do
 done
 
 # define file input/output
-#ROOTDIR="/cygdrive/c/Users/sheacd/GitHub/WebUtils"
 ROOTDIR="$(dirname $0)"
-#printf '%s\n' "${ROOTDIR}"
-topic=""
 
 # define input
 if [[ ! -z "${SUBJECT}" ]]; then 
